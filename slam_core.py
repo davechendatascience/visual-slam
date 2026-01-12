@@ -10,6 +10,14 @@ import matplotlib.pyplot as plt
 from plyfile import PlyData, PlyElement
 import plotly.graph_objects as go
 
+# Optional CUDA Rasterizer
+try:
+    from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+    CUDA_RASTERIZER_AVAILABLE = True
+except ImportError:
+    CUDA_RASTERIZER_AVAILABLE = False
+
+
 # --- 1. DATASET LOADER ---
 def associate_data(root_dir):
     def read_file_list(filename):
@@ -207,6 +215,33 @@ def pure_pytorch_rasterization(means, colors, opacities, scales, quats, viewmat,
     else:
         return rasterize_solid(means, colors, opacities, scales, quats, viewmat, K, height, width)
 
+def get_projection_matrix(K, H, W, n=0.01, f=100.0):
+    fovx = 2 * np.arctan(W / (2 * K[0, 0]))
+    fovy = 2 * np.arctan(H / (2 * K[1, 1]))
+    
+    tan_fovx = np.tan(fovx / 2)
+    tan_fovy = np.tan(fovy / 2)
+    
+    top = tan_fovy * n
+    bottom = -top
+    right = tan_fovx * n
+    left = -right
+    
+    P = torch.zeros(4, 4)
+    z_sign = 1.0 # OpenGL convention usually? Or different for diff-gaussian? 
+    # diff-gaussian expects standard OpenGL projection
+    
+    P[0, 0] = 2 * n / (right - left)
+    P[1, 1] = 2 * n / (top - bottom)
+    P[0, 2] = (right + left) / (right - left)
+    P[1, 2] = (top + bottom) / (top - bottom)
+    P[3, 2] = z_sign
+    P[2, 2] = z_sign * f / (f - n)
+    P[2, 3] = -(f * n) / (f - n)
+    
+    return P, np.tan(fovx/2), np.tan(fovy/2)
+
+
 # --- 3. MODEL (Device Agnostic) ---
 class SimpleGaussianModel(nn.Module):
     def __init__(self, device='cuda'):
@@ -253,10 +288,86 @@ class SimpleGaussianModel(nn.Module):
         render_colors = torch.sigmoid(self.colors)
         opacities = torch.sigmoid(self.opacities)
         
+        # Check for CUDA Rasterizer
+        if CUDA_RASTERIZER_AVAILABLE and self.device != 'cpu':
+             # Prepare Inputs for diff-gaussian-rasterization
+             # 1. Proj Matrix
+             # Note: simple K-based projection
+             fx = K[0,0]; fy = K[1,1]
+             fovx = 2 * torch.atan(width / (2 * fx))
+             fovy = 2 * torch.atan(height / (2 * fy))
+             tanfovx = torch.tan(fovx * 0.5)
+             tanfovy = torch.tan(fovy * 0.5)
+             
+             # Create OpenGL Projection Matrix
+             zfar = 100.0; znear = 0.01
+             P = torch.zeros(4, 4, device=self.device)
+             P[0, 0] = 1.0 / tanfovx
+             P[1, 1] = 1.0 / tanfovy
+             P[2, 2] = zfar / (zfar - znear)
+             P[2, 3] = -(zfar * znear) / (zfar - znear)
+             P[3, 2] = 1.0
+             
+             # World to Screen = P @ View
+             # diff-gaussian expects "full_proj_transform" -> P @ View
+             # But View is W2C.
+             
+             # Transpose check: diff-gaussian often expects Row-Major or specific layout?
+             # Standard: full_proj = Proj @ View
+             
+             # NOTE: diff-gaussian documentation requires Transposed matrices if inputs are Row-Major?
+             # Let's assume standard PyTorch Layout (Row Major) but math is Column Major?
+             # The codebase typically uses transposed ViewMat.
+             
+             viewmat_t = viewmat.transpose(0, 1) # to Column Major?
+             proj_t = P.transpose(0, 1)
+             full_proj = (P @ viewmat).transpose(0, 1)
+             
+             camera_center = torch.inverse(viewmat)[:3, 3]
+             
+             raster_settings = GaussianRasterizationSettings(
+                image_height=int(height),
+                image_width=int(width),
+                tanfovx=tanfovx,
+                tanfovy=tanfovy,
+                bg=torch.tensor([0, 0, 0], device=self.device, dtype=torch.float32),
+                scale_modifier=1.0,
+                viewmatrix=viewmat_t,
+                projmatrix=full_proj,
+                sh_degree=0,
+                campos=camera_center,
+                prefiltered=False,
+                debug=False
+             )
+             
+             rasterizer = GaussianRasterizer(raster_settings)
+             
+             rendered_image, radii = rasterizer(
+                means3D = self.means,
+                means2D = torch.zeros_like(self.means),
+                shs = None,
+                colors_precomp = render_colors, # RGB
+                opacities = opacities,
+                scales = torch.exp(self.scales),
+                rotations = self.quats,
+                cov3D_precomp = None
+             )
+             
+             # Diff-Gaussian returns (3, H, W). We need (H, W, 4) with Depth?
+             # Wait, diff-gaussian doesn't return depth by default in RGB mode.
+             rgb = rendered_image.permute(1, 2, 0) # (H, W, 3)
+             
+             # Hack for depth: use distance to mean? No, that's not rasterized depth.
+             # If we need depth for tracking, we might need a modified rasterizer or just use RGB loss.
+             
+             # If strictly RGB mode, return dummy depth
+             return torch.cat([rgb, torch.zeros(height, width, 1, device=self.device)], dim=2)
+
         return pure_pytorch_rasterization(
             self.means, render_colors, opacities, torch.exp(self.scales), self.quats,
             viewmat, K, height, width, mode=mode
         )
+
         
     def prune_points(self, min_opacity=0.005):
         # Prune points with low opacity to keep map sparse
@@ -536,8 +647,9 @@ def optimize_map_window(model, keyframes, K, H, W, iters=10):
         frame = keyframes[idx]
         
         c2w = frame['c2w']
-        gt_rgb = frame['rgb']     # Expected to be tensor on device
-        gt_depth = frame.get('depth') # Expected to be tensor on device
+        gt_rgb = frame['rgb'].to(model.means.device) 
+        gt_depth = frame.get('depth')
+        if gt_depth is not None: gt_depth = gt_depth.to(model.means.device)
         
         # Prepare View
         if isinstance(c2w, np.ndarray):
