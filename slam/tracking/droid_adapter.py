@@ -28,7 +28,26 @@ class DroidSLAMAdapter:
 
         # DROID-SLAM uses its own API. We keep this minimal and defer details
         # to initialization to avoid import errors in environments lacking deps.
-        from droid import Droid  # type: ignore
+        try:
+            from droid_slam.droid import Droid  # type: ignore
+        except ModuleNotFoundError:
+            droid_py = os.path.join(repo_path, "droid_slam", "droid.py")
+            if not os.path.exists(droid_py):
+                raise ModuleNotFoundError(
+                    "Could not import DROID-SLAM module. "
+                    f"Expected {droid_py} to exist. "
+                    "Check tracking.droid.repo_path and your venv."
+                )
+            import importlib.util
+
+            spec = importlib.util.spec_from_file_location("droid_slam.droid", droid_py)
+            if spec is None or spec.loader is None:
+                raise ModuleNotFoundError(
+                    f"Failed to load DROID-SLAM module from {droid_py}"
+                )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            Droid = module.Droid
 
         self.Droid = Droid
         self.droid = None

@@ -12,7 +12,7 @@ camera:
 
 tracking:
   use_gt_init: true
-  mode: orb_pnp
+  mode: droid
   droid:
     repo_path: /home/itrib40351/Documents/GitHub/others/DROID-SLAM
 
