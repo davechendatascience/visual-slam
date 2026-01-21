@@ -1,0 +1,39 @@
+dataset:
+  root: /home/itrib40351/Documents/GitHub/my_repos/visual-slam/datasets/tum/fr3_office
+  depth_scale: 5000.0
+  url: https://vision.in.tum.de/rgbd/dataset/freiburg3/rgbd_dataset_freiburg3_long_office_household.tgz
+
+camera:
+  # TUM RGB-D intrinsics (fr3)
+  K:
+    - [535.4, 0.0, 320.1]
+    - [0.0, 539.2, 247.6]
+    - [0.0, 0.0, 1.0]
+
+tracking:
+  use_gt_init: true
+  mode: orb_pnp
+  droid:
+    repo_path: /home/itrib40351/Documents/GitHub/others/DROID-SLAM
+
+mapping:
+  subsample: 4
+  max_gaussians: 500000
+  min_opacity: 0.05
+
+runtime:
+  device: cuda
+  target_fps: 30.0
+  frame_queue_size: 32
+  keyframe_queue_size: 32
+  loop_queue_size: 32
+  log_every_n: 1
+
+output:
+  dir: /home/itrib40351/Documents/GitHub/my_repos/visual-slam/outputs
+
+visualization:
+  live: true
+  interval_s: 1.0
+  max_points: 200000
+

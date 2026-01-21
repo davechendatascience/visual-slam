@@ -1,0 +1,9 @@
+numpy
+torch
+opencv-python
+scipy
+pyyaml
+pillow
+plotly
+matplotlib
+
