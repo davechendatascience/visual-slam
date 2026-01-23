@@ -73,6 +73,10 @@ class RGBDTracker:
 
 
 def should_make_keyframe(curr_c2w, last_kf_c2w, inlier_ratio, min_trans=0.05, min_rot_deg=15.0):
+    if curr_c2w is not None and getattr(curr_c2w, "ndim", 0) == 3:
+        curr_c2w = curr_c2w[0]
+    if last_kf_c2w is not None and getattr(last_kf_c2w, "ndim", 0) == 3:
+        last_kf_c2w = last_kf_c2w[0]
     if last_kf_c2w is None:
         return True
     delta_t = np.linalg.norm(curr_c2w[:3, 3] - last_kf_c2w[:3, 3])

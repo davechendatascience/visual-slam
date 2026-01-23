@@ -4,10 +4,20 @@ import argparse
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ply", required=True)
+    parser.add_argument("--html", default=None, help="Optional path to save HTML viewer")
+    parser.add_argument("--normalize", action="store_true", help="Center and scale points for viewing")
     args = parser.parse_args()
 
     import numpy as np
     import plotly.graph_objects as go
+    import plotly.io as pio
+
+    # Use colab-friendly renderer when available
+    try:
+        import google.colab  # type: ignore
+        pio.renderers.default = "colab"
+    except Exception:
+        pass
 
     points = []
     colors = []
@@ -31,6 +41,13 @@ def main():
 
     pts = np.array(points)
     cols = np.array(colors)
+
+    if args.normalize and len(pts) > 0:
+        center = pts.mean(axis=0)
+        pts = pts - center
+        scale = np.max(np.linalg.norm(pts, axis=1))
+        if scale > 0:
+            pts = pts / scale
     fig = go.Figure(
         data=[
             go.Scatter3d(
@@ -43,6 +60,9 @@ def main():
         ]
     )
     fig.update_layout(scene=dict(aspectmode="data"), title="PLY Viewer")
+    if args.html:
+        fig.write_html(args.html)
+        print(f"Saved viewer to {args.html}")
     fig.show()
 
 

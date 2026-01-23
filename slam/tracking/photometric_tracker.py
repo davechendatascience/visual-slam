@@ -26,13 +26,16 @@ class PhotometricTracker:
         self.iters = iters
         self.lr = lr
 
-    def track(self, gaussian_map, init_c2w, rgb):
+    def track(self, gaussian_map, init_c2w, rgb, depth=None):
         if gaussian_map.means.shape[0] == 0:
             return init_c2w, 0.0
 
         rgb_t = torch.tensor(rgb, dtype=torch.float32, device=self.device) / 255.0
         H, W, _ = rgb_t.shape
 
+        if depth is not None:
+             depth_t = torch.tensor(depth, dtype=torch.float32, device=self.device)
+        
         means = gaussian_map.means
         colors = gaussian_map.colors
 
@@ -73,10 +76,15 @@ class PhotometricTracker:
             u = u[finite]
             v = v[finite]
             cols = cols[finite]
+            # Must filter z properly here too since it needs to align with others
+            z = z[finite] 
+            
             in_bounds = (u >= 0) & (u < W - 1) & (v >= 0) & (v < H - 1)
             u = u[in_bounds]
             v = v[in_bounds]
             cols = cols[in_bounds]
+            z = z[in_bounds]
+            
             if u.numel() < 100:
                 return init_c2w, 0.0
 
@@ -87,14 +95,30 @@ class PhotometricTracker:
             v_norm = v_norm.clamp(-1.0, 1.0)
             grid = torch.stack([u_norm, v_norm], dim=-1).view(1, -1, 1, 2)
 
+            # Sample RGB
             img = rgb_t.permute(2, 0, 1).unsqueeze(0)
             sampled = F.grid_sample(img, grid, mode="bilinear", align_corners=True)
-            gt = sampled.squeeze(0).squeeze(-1).permute(1, 0)
+            gt_rgb = sampled.squeeze(0).squeeze(-1).permute(1, 0)
 
-            loss = torch.abs(cols - gt).mean()
+            rgb_loss = torch.abs(cols - gt_rgb).mean()
+            
+            depth_loss = 0.0
+            if depth is not None:
+                # Sample Depth
+                # Add channel dim for grid_sample
+                dimg = depth_t.unsqueeze(0).unsqueeze(0) 
+                sampled_d = F.grid_sample(dimg, grid, mode="nearest", align_corners=True)
+                gt_depth = sampled_d.squeeze()
+                
+                # Check for valid depth in GT
+                valid_depth = (gt_depth > 0.1) & (gt_depth < 10.0) & torch.isfinite(gt_depth)
+                
+                if valid_depth.sum() > 10:
+                     depth_loss = torch.abs(z[valid_depth] - gt_depth[valid_depth]).mean()
+
+            loss = rgb_loss + 0.5 * depth_loss
             loss.backward()
             optim.step()
 
         c2w_final = c2w.detach().cpu().numpy()
         return c2w_final, float(in_bounds.float().mean().item())
-

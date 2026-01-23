@@ -8,7 +8,7 @@ each step without guessing what comes next.
 
 ## 0) Prerequisites
 
-- GPU recommended (CUDA) for DROID-SLAM and any dense tracking.
+- GPU recommended (CUDA) for dense tracking and mapping.
 - Python env with `requirements.txt` installed.
 - TUM RGB-D sequence (fr3_office) configured in `configs/tum_fr3_office.yaml`.
 
@@ -31,23 +31,7 @@ Validation:
 
 ---
 
-## 2) DROID-SLAM Integration (Chosen Tracking)
-
-Goal: replace CPU tracking with DROID-SLAM pose inference.
-
-Checklist:
-1. Clone DROID-SLAM: `https://github.com/princeton-vl/DROID-SLAM`
-2. Set `tracking.mode: droid` in config.
-3. Set `tracking.droid.repo_path` to the clone path.
-4. Verify `DroidSLAMAdapter` imports and runs.
-
-Validation:
-- Run and confirm tracking uses DROID-SLAM (add a log if needed).
-- Compare ATE vs ORB-PnP baseline.
-
----
-
-## 3) Mapping: 3D Gaussian Map (Current)
+## 2) Mapping: 3D Gaussian Map (Current)
 
 Goal: map is represented as 3D Gaussians with RGB colors.
 
@@ -62,7 +46,7 @@ Validation:
 
 ---
 
-## 4) Loop Closure (Async)
+## 3) Loop Closure (Async)
 
 Goal: global drift correction without blocking tracking.
 
@@ -77,7 +61,7 @@ Validation:
 
 ---
 
-## 5) Performance Targets
+## 4) Performance Targets
 
 Initial targets:
 - Tracking at ≥ 15 FPS on a GPU.
@@ -90,7 +74,7 @@ Knobs:
 
 ---
 
-## 6) Accuracy & Stability Checks
+## 5) Accuracy & Stability Checks
 
 Checklist:
 1. No GT pose used for reconstruction unless explicitly enabled.
@@ -98,12 +82,3 @@ Checklist:
 3. Map density stays bounded (pruning).
 
 ---
-
-## 7) Research Notes (Why DROID-SLAM)
-
-- DROID-SLAM is a strong GPU tracking front-end with high accuracy.
-- It is widely used as a baseline for dense tracking.
-- It can be paired with our 3DGS mapper for a fast + stable pipeline.
-
-Reference: https://github.com/princeton-vl/DROID-SLAM
-

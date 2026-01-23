@@ -12,9 +12,21 @@ camera:
 
 tracking:
   use_gt_init: true
-  mode: droid
-  droid:
-    repo_path: /home/itrib40351/Documents/GitHub/others/DROID-SLAM
+  mode: orb_pnp
+  orb_pnp:
+    n_features: 1000
+    n_matches: 100
+    threshold: 0.01
+    min_matches: 10
+    max_matches: 100
+    min_distance: 0.01
+    max_distance: 1.0
+    min_angle: 0.01
+  # mode: photometric
+  # photometric:
+  #   max_points: 8000
+  #   iters: 20
+  #   lr: 1e-2
 
 mapping:
   subsample: 4

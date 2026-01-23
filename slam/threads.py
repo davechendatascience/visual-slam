@@ -7,7 +7,6 @@ import numpy as np
 from slam.core.data_types import Frame, Keyframe
 from slam.tracking.tracker import RGBDTracker, should_make_keyframe
 from slam.tracking.photometric_tracker import PhotometricTracker
-from slam.tracking.droid_adapter import DroidSLAMAdapter
 from slam.mapping.mapper import GaussianMapper
 from slam.loop.loop_closure import LoopDetector
 
@@ -35,13 +34,10 @@ class SLAMSystem:
             self.pose_tracker = PhotometricTracker(
                 K,
                 device=config["runtime"]["device"],
-                max_points=config["tracking"].get("photometric", {}).get("max_points", 8000),
-                iters=config["tracking"].get("photometric", {}).get("iters", 20),
-                lr=config["tracking"].get("photometric", {}).get("lr", 1e-2),
+                max_points=int(config["tracking"].get("photometric", {}).get("max_points", 8000)),
+                iters=int(config["tracking"].get("photometric", {}).get("iters", 20)),
+                lr=float(config["tracking"].get("photometric", {}).get("lr", 1e-2)),
             )
-        elif tracking_mode == "droid":
-            repo_path = config["tracking"].get("droid", {}).get("repo_path", "")
-            self.pose_tracker = DroidSLAMAdapter(repo_path, device=config["runtime"]["device"])
         else:
             self.pose_tracker = self.feature_extractor
         self.mapper = GaussianMapper(
@@ -74,6 +70,7 @@ class SLAMSystem:
         prev_kf = None
         last_kf_c2w = None
         keyframe_id = 0
+        prev_pose = None
         while not self.stop_event.is_set():
             try:
                 frame = self.frame_queue.get(timeout=0.1)
@@ -101,13 +98,12 @@ class SLAMSystem:
                 continue
 
             if isinstance(self.pose_tracker, PhotometricTracker):
-                c2w, inlier_ratio = self.pose_tracker.track(self.map, prev_kf.c2w, frame.rgb)
-            elif isinstance(self.pose_tracker, DroidSLAMAdapter):
-                c2w, inlier_ratio = self.pose_tracker.track(
-                    frame.rgb, depth=frame.depth, intrinsics=self.K
-                )
+                c2w, inlier_ratio = self.pose_tracker.track(self.map, prev_kf.c2w, frame.rgb, depth=frame.depth)
             else:
                 c2w, inlier_ratio = self.pose_tracker.track(prev_kf, frame.rgb, frame.depth)
+
+            if c2w is not None and getattr(c2w, "ndim", 0) == 3:
+                c2w = c2w[0]
             with self.state_lock:
                 self.poses.append((frame.timestamp, c2w))
 
@@ -152,12 +148,27 @@ class SLAMSystem:
             if self.frame_count % log_every == 0:
                 tracking_ms = (t1 - t0) * 1000.0
                 total_ms = (time.time() - t0) * 1000.0
+                dtrans = 0.0
+                drot = 0.0
+                if prev_pose is not None:
+                    dtrans = float(np.linalg.norm(c2w[:3, 3] - prev_pose[:3, 3]))
+                    R_delta = c2w[:3, :3] @ prev_pose[:3, :3].T
+                    drot = float(
+                        np.degrees(
+                            np.arccos(
+                                np.clip((np.trace(R_delta) - 1.0) / 2.0, -1.0, 1.0)
+                            )
+                        )
+                    )
                 print(
                     f"[TRACK] frame={self.frame_count} "
                     f"tracking_ms={tracking_ms:.2f} "
                     f"global_update_ms={global_update_ms:.2f} "
-                    f"total_ms={total_ms:.2f}"
+                    f"total_ms={total_ms:.2f} "
+                    f"dtrans={dtrans:.4f} "
+                    f"drot={drot:.2f}"
                 )
+            prev_pose = c2w.copy()
 
     def _mapping_loop(self):
         while not self.stop_event.is_set():
@@ -188,4 +199,3 @@ class SLAMSystem:
 
     def get_poses(self):
         return list(self.poses)
-
