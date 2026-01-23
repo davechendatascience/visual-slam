@@ -41,11 +41,12 @@ class GaussianMap:
         self.opacities = self.opacities[mask]
 
     def apply_global_transform(self, T_world_new_from_world_old):
-        R = T_world_new_from_world_old[:3, :3]
-        t = T_world_new_from_world_old[:3, 3]
-        means = self.means.detach().cpu().numpy()
-        means = (R @ means.T).T + t
-        self.means = torch.tensor(means, dtype=torch.float32, device=self.device)
+        T = torch.tensor(T_world_new_from_world_old, dtype=torch.float32, device=self.device)
+        R = T[:3, :3]
+        t = T[:3, 3]
+        
+        # Apply transform in-place on GPU
+        self.means = (R @ self.means.T).T + t
 
     def to_ply(self, path):
         means = self.means.detach().cpu().numpy()

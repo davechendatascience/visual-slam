@@ -73,9 +73,15 @@ def ensure_tum_dataset(root_dir, url):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument("--no-viewer", action="store_true", help="Disable live viewer")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if args.no_viewer:
+        if "visualization" not in cfg:
+            cfg["visualization"] = {}
+        cfg["visualization"]["live"] = False
+
     dataset_root = cfg["dataset"]["root"]
     dataset_url = cfg["dataset"].get(
         "url",
