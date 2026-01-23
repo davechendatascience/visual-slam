@@ -1,25 +1,42 @@
 import numpy as np
-from scipy.spatial.transform import Rotation
-
-
-def quat_to_rot(qx, qy, qz, qw):
-    return Rotation.from_quat([qx, qy, qz, qw]).as_matrix()
-
 
 def rot_to_quat(R):
-    q = Rotation.from_matrix(R).as_quat()
-    return q[0], q[1], q[2], q[3]
+    # R is 3x3 rotation matrix
+    # Returns [x, y, z, w]
+    tr = np.trace(R)
+    if tr > 0:
+        S = np.sqrt(tr + 1.0) * 2
+        qw = 0.25 * S
+        qx = (R[2, 1] - R[1, 2]) / S
+        qy = (R[0, 2] - R[2, 0]) / S
+        qz = (R[1, 0] - R[0, 1]) / S
+    elif (R[0, 0] > R[1, 1]) and (R[0, 0] > R[2, 2]):
+        S = np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2
+        qw = (R[2, 1] - R[1, 2]) / S
+        qx = 0.25 * S
+        qy = (R[0, 1] + R[1, 0]) / S
+        qz = (R[0, 2] + R[2, 0]) / S
+    elif R[1, 1] > R[2, 2]:
+        S = np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2
+        qw = (R[0, 2] - R[2, 0]) / S
+        qx = (R[0, 1] + R[1, 0]) / S
+        qy = 0.25 * S
+        qz = (R[1, 2] + R[2, 1]) / S
+    else:
+        S = np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2
+        qw = (R[1, 0] - R[0, 1]) / S
+        qx = (R[0, 2] + R[2, 0]) / S
+        qy = (R[1, 2] + R[2, 1]) / S
+        qz = 0.25 * S
+    return np.array([qx, qy, qz, qw])
 
+def pose_inv(T):
+    R = T[:3, :3]
+    t = T[:3, 3]
+    T_inv = np.eye(4, dtype=T.dtype)
+    T_inv[:3, :3] = R.T
+    T_inv[:3, 3] = -R.T @ t
+    return T_inv
 
-def pose_inv(c2w):
-    R = c2w[:3, :3]
-    t = c2w[:3, 3]
-    w2c = np.eye(4, dtype=np.float32)
-    w2c[:3, :3] = R.T
-    w2c[:3, 3] = -R.T @ t
-    return w2c
-
-
-def pose_compose(a, b):
-    return a @ b
-
+def pose_compose(T1, T2):
+    return T1 @ T2

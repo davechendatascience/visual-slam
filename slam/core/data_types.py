@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import numpy as np
-
+from typing import Optional, Any
 
 @dataclass
 class Frame:
@@ -9,7 +9,6 @@ class Frame:
     depth: np.ndarray
     c2w: np.ndarray
 
-
 @dataclass
 class Keyframe:
     keyframe_id: int
@@ -17,6 +16,5 @@ class Keyframe:
     rgb: np.ndarray
     depth: np.ndarray
     c2w: np.ndarray
-    keypoints: list
-    descriptors: np.ndarray
-
+    keypoints: Optional[list] = None
+    descriptors: Optional[np.ndarray] = None

@@ -1,40 +1,54 @@
 import numpy as np
-
+import torch
 
 class GaussianMapper:
-    def __init__(self, gaussian_map, K, depth_range=(0.1, 8.0), subsample=4):
-        self.map = gaussian_map
+    def __init__(self, gaussian_map, K, subsample=1):
+        self.gaussian_map = gaussian_map
         self.K = K
-        self.depth_min, self.depth_max = depth_range
         self.subsample = subsample
 
-    def add_keyframe(self, keyframe):
-        rgb = keyframe.rgb.astype(np.float32) / 255.0
-        depth = keyframe.depth.astype(np.float32)
+    def add_keyframe(self, kf):
+        # kf has rgb, depth, c2w
+        rgb = kf.rgb
+        depth = kf.depth
+        c2w = kf.c2w
+        
+        # Subsample
+        if self.subsample > 1:
+            rgb = rgb[::self.subsample, ::self.subsample]
+            depth = depth[::self.subsample, ::self.subsample]
+            
         H, W = depth.shape
-        ys, xs = np.indices((H, W))
-        ys = ys[:: self.subsample, :: self.subsample]
-        xs = xs[:: self.subsample, :: self.subsample]
-        z = depth[:: self.subsample, :: self.subsample]
-        valid = (z > self.depth_min) & (z < self.depth_max)
+        K = self.K.copy()
+        K[:2] /= self.subsample
 
-        fx, fy = self.K[0, 0], self.K[1, 1]
-        cx, cy = self.K[0, 2], self.K[1, 2]
-        x = (xs - cx) * z / fx
-        y = (ys - cy) * z / fy
-        xyz_cam = np.stack([x, y, z], axis=-1).reshape(-1, 3)
-        colors = rgb[:: self.subsample, :: self.subsample].reshape(-1, 3)
-        mask = valid.reshape(-1)
-        xyz_cam = xyz_cam[mask]
-        colors = colors[mask]
-
-        R = keyframe.c2w[:3, :3]
-        t = keyframe.c2w[:3, 3]
-        xyz_world = (R @ xyz_cam.T).T + t
-        finite = np.isfinite(xyz_world).all(axis=1) & np.isfinite(colors).all(axis=1)
-        if finite.sum() == 0:
+        # Backprojection
+        y, x = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
+        x = x.flatten()
+        y = y.flatten()
+        z = depth.flatten()
+        
+        valid = (z > 0.1) & (z < 10.0)
+        x = x[valid]
+        y = y[valid]
+        z = z[valid]
+        rgbs = rgb.reshape(-1, 3)[valid] / 255.0
+        
+        if len(z) == 0:
             return
-        xyz_world = xyz_world[finite]
-        colors = np.clip(colors[finite], 0.0, 1.0)
-        self.map.add_gaussians(xyz_world, colors)
-
+            
+        fx, fy = K[0, 0], K[1, 1]
+        cx, cy = K[0, 2], K[1, 2]
+        
+        X = (x - cx) * z / fx
+        Y = (y - cy) * z / fy
+        Z = z
+        
+        points_cam = np.stack([X, Y, Z], axis=1)
+        
+        # Transform to world
+        R = c2w[:3, :3]
+        t = c2w[:3, 3]
+        points_world = (R @ points_cam.T).T + t
+        
+        self.gaussian_map.add_gaussians(points_world, rgbs)
