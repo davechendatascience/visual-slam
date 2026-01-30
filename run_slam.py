@@ -112,7 +112,12 @@ def main():
 
     for frame_meta in frames:
         rgb, depth = read_frame(frame_meta, depth_scale)
-        c2w_init = frame_meta["c2w_gt"] if cfg["tracking"]["use_gt_init"] else np.eye(4, dtype=np.float32)
+        if cfg["tracking"]["use_gt_init"]:
+            if frame_meta["c2w_gt"] is None:
+                continue
+            c2w_init = frame_meta["c2w_gt"]
+        else:
+            c2w_init = np.eye(4, dtype=np.float32)
         frame = Frame(
             timestamp=frame_meta["timestamp"],
             rgb=rgb,
